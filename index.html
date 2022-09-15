@@ -158,6 +158,10 @@
             <input type="radio" name="displayType" id="displayTypeDistanceField">
             Distance field
           </label>
+          <label>
+            <input type="radio" name="displayType" id="displayTypeDistanceFieldRendered">
+            Distance field (rendered)
+          </label>
           <div id="displayTypeNormalOptions">
             &nbsp;<br>
             <table>
@@ -226,6 +230,7 @@
   var checkboxDataFormatJSON = document.getElementById('dataFormatJSON');
   var checkboxDataFormatXML = document.getElementById('dataFormatXML');
   var checkboxDisplayTypeDistanceField = document.getElementById('displayTypeDistanceField');
+  var checkboxDisplayTypeDistanceFieldRendered = document.getElementById('displayTypeDistanceFieldRendered');
   var checkboxDisplayTypeNormal = document.getElementById('displayTypeNormal');
   var checkboxFontBold = document.getElementById('fontBold');
   var checkboxFontItalic = document.getElementById('fontItalic');
@@ -538,7 +543,7 @@
 
   function updateDisplayType() {
     optionsDisplayTypeNormal.style.display = displayTypeNormal.checked ? 'block' : 'none';
-    optionsDisplayTypeDistanceField.style.display = displayTypeDistanceField.checked ? 'block' : 'none';
+    optionsDisplayTypeDistanceField.style.display = displayTypeDistanceField.checked || displayTypeDistanceFieldRendered.checked ? 'block' : 'none';
     generate();
   }
 
@@ -549,14 +554,14 @@
   }
 
   function renderCodePoint(codePoint, multiplier) {
-    var distanceFieldScaleFactor = checkboxDisplayTypeDistanceField.checked ? 2 : 1; // Sample distance field at 2x for anti-aliasing
+    var distanceFieldScaleFactor = checkboxDisplayTypeDistanceField.checked || checkboxDisplayTypeDistanceFieldRendered.checked ? 2 : 1; // Sample distance field at 2x for anti-aliasing
     var size = fontSize * distanceFieldScaleFactor;
     var originX = Math.round(fontSize * (multiplier - 1) / 2) * distanceFieldScaleFactor;
     var originY = Math.round(fontSize * (multiplier + 1) / 2) * distanceFieldScaleFactor;
     var character = codePointToString(codePoint);
     var width = canvas.width = size * multiplier;
     var height = canvas.height = size * multiplier;
-    var bg = checkboxDisplayTypeDistanceField.checked ? {r: 0, g: 0, b: 0, a: 0} : backgroundColor;
+    var bg = checkboxDisplayTypeDistanceField.checked || checkboxDisplayTypeDistanceFieldRendered.checked ? {r: 0, g: 0, b: 0, a: 0} : backgroundColor;
 
     context.font =
       (checkboxFontBold.checked ? 'bold ' : '') +
@@ -665,9 +670,20 @@
     if (checkboxDisplayTypeDistanceField.checked) {
       image = convertToDistanceField(image, distanceFieldFalloff * distanceFieldScaleFactor);
       image = downsampleLuminanceBy2(image); // Anti-aliasing
+    } else if (checkboxDisplayTypeDistanceFieldRendered.checked) {
+      image = padImage(image, distanceFieldFalloff * distanceFieldScaleFactor);
+      swizzle(image, 3, 0);
+      image = downsampleLuminanceBy2(image); // Anti-aliasing
     }
 
     return image;
+  }
+
+  function swizzle(image, srcChannel, dstChannel) {
+    const data = image.data;
+    for (let i = 0; i < data.length; i += 4) {
+      data[i + dstChannel] = data[i + srcChannel];
+    }
   }
 
   function downsampleLuminanceBy2(image) {
@@ -684,12 +700,13 @@
       var to = y * newWidth << 2;
 
       for (var x = 0; x < newWidth; x++) {
-        newData[to] = newData[to + 1] = newData[to + 2] = (
+        // Note: (x + 2) >> 2 is dividing by 4 and rounding to nearest
+        newData[to] = newData[to + 1] = newData[to + 2] = ((
           oldData[from] +
           oldData[from + 4] +
           oldData[from + oldStride] +
           oldData[from + oldStride + 4]
-        ) >> 2;
+        ) + 2) >> 2;
         newData[to + 3] = 255;
         from += 8;
         to += 4;
@@ -840,6 +857,42 @@
     }
   }
 
+  function padImage(image, padding) {
+    var oldWidth = image.width;
+    var oldHeight = image.height;
+    var data = image.data;
+    var newWidth = oldWidth + 2 * padding;
+    var newHeight = oldHeight + 2 * padding;
+    var bytes = new Uint8Array(newWidth * newHeight << 2);
+    for (var y = 0, i = 0; y < newHeight; y++) {
+      for (var x = 0; x < newWidth; x++, i += 4) {
+        bytes[i+0] = 0;
+        bytes[i+1] = 0;
+        bytes[i+2] = 0;
+        bytes[i+3] = 0;
+      }
+    }
+    for (var y = 0; y < oldHeight; y++) {
+      for (var x = 0; x < oldWidth; x++) {
+        const i0 = (y*oldWidth + x)*4;
+        const i = ((y+padding)*newWidth + (x+padding))*4;
+        bytes[i+0] = data[i0+0];
+        bytes[i+1] = data[i0+1];
+        bytes[i+2] = data[i0+2];
+        bytes[i+3] = data[i0+3];
+      }
+    }
+
+    return {
+      width: newWidth,
+      height: newHeight,
+      data: bytes,
+      originX: image.originX + padding,
+      originY: image.originY + padding,
+      advance: image.advance,
+    };
+  }
+
   function convertToDistanceField(image, falloff) {
     var oldWidth = image.width;
     var oldHeight = image.height;
@@ -984,7 +1037,7 @@
     var imageData = context.createImageData(packed.width, packed.height);
     var data = imageData.data;
 
-    if (checkboxDisplayTypeDistanceField.checked) {
+    if (checkboxDisplayTypeDistanceField.checked || checkboxDisplayTypeDistanceFieldRendered.checked) {
       for (var i = 0; i < data.length; i += 4) {
         data[i] = 0;
         data[i + 1] = 0;
@@ -1128,6 +1181,7 @@
   checkboxDataFormatJSON.onchange = generate;
   checkboxDataFormatXML.onchange = generate;
   checkboxDisplayTypeDistanceField.onchange = updateDisplayType;
+  checkboxDisplayTypeDistanceFieldRendered.onchange = updateDisplayType;
   checkboxDisplayTypeNormal.onchange = updateDisplayType;
   checkboxFontBold.onchange = generate;
   checkboxFontItalic.onchange = generate;
